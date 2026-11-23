@@ -10,12 +10,13 @@ overview see the [README](../README.md).
 - [5. Push notifications](#5-push-notifications)
 - [6. User accounts](#6-user-accounts)
 - [7. Newsletter sign-up](#7-newsletter-sign-up)
-- [8. Reset and account deletion](#8-reset-and-account-deletion)
-- [9. How the SDK behaves](#9-how-the-sdk-behaves)
-- [10. Privacy](#10-privacy)
-- [11. Testing and troubleshooting](#11-testing-and-troubleshooting)
-- [12. API reference](#12-api-reference)
-- [13. The server API](#13-the-server-api)
+- [8. Language, tags and premium](#8-language-tags-and-premium)
+- [9. Reset and account deletion](#9-reset-and-account-deletion)
+- [10. How the SDK behaves](#10-how-the-sdk-behaves)
+- [11. Privacy](#11-privacy)
+- [12. Testing and troubleshooting](#12-testing-and-troubleshooting)
+- [13. API reference](#13-api-reference)
+- [14. The server API](#14-the-server-api)
 
 ## 1. What the SDK does
 
@@ -73,7 +74,7 @@ dependencyResolutionManagement {
 
 // app/build.gradle.kts
 dependencies {
-    implementation("com.github.tappytaps:ttmailer-sdk-android:0.1.0")
+    implementation("com.github.tappytaps:ttmailer-sdk-android:0.2.0")
 }
 ```
 
@@ -81,7 +82,7 @@ With a version catalog:
 
 ```toml
 [libraries]
-ttmailer = { module = "com.github.tappytaps:ttmailer-sdk-android", version = "0.1.0" }
+ttmailer = { module = "com.github.tappytaps:ttmailer-sdk-android", version = "0.2.0" }
 ```
 
 The library declares the `INTERNET` permission and ships its ProGuard / R8 rules; nothing else is needed. Firebase
@@ -245,7 +246,64 @@ TTMailer.subscribe(email) { result ->
 - `NO_FORM` and `FORM_WITHOUT_CONFIRMATION` are setup errors (section 2): the app has no form, or the form does not
   confirm.
 
-## 8. Reset and account deletion
+## 8. Language, tags and premium
+
+### The app's own language
+
+```kotlin
+TTMailer.setLanguage("de")   // the user picked German in the app
+TTMailer.setLanguage(null)   // back to the system language
+```
+
+TTMailer writes to the user in this language (e-mails and pushes with language variants). Kept between launches.
+
+### Tags
+
+```kotlin
+TTMailer.addTags(listOf("sportovec"))
+TTMailer.removeTags(listOf("beta"))
+```
+
+Tags of the user's contact, for audiences in TTMailer (e.g. people who use one feature). Keys: a-z, 0-9, `_` and `-`,
+40 at most; uppercase is lowered. They wait offline and are sent with the installation. A tag the SDK adds can be
+removed by the team in TTMailer and vice versa.
+
+### Premium (purchases)
+
+TTMailer keeps the user's premium (until when, its kind, since when) for audiences like "trial ended, did not buy".
+Two ways, pick one:
+
+**Automatic (off by default).** The SDK reads the user's purchases from Play Billing at launch and whenever the app
+comes to the foreground. The app must use Play Billing 7 or newer (the SDK uses the app's own library):
+
+```kotlin
+TTMailer.configure(this, "tta_…")
+TTMailer.enableAutomaticPurchases(setOf("pro_lifetime"))
+```
+
+- An active subscription: premium until its next renewal, kind `paid`. Play does not tell the app the end or a free
+  trial: the SDK counts the renewal from the purchase by the product's billing period (a month if Play does not say).
+  A cancelled subscription is premium until the user opens the app after it lapsed.
+- A product in `lifetimeProductIds`: a lifetime premium.
+- Every one-time product owned: a tag `koupeno_<product>` (lowercase, other characters
+  `_`), e.g. `koupeno_themes_pack`. A refunded product loses its tag.
+- A refunded product or subscription ends the premium the next time the app is opened.
+- Consumables (coins, credits) are not reported.
+- The SDK only reads: it never acknowledges or consumes purchases; the app keeps doing that.
+
+**Manual**, e.g. with RevenueCat:
+
+```kotlin
+TTMailer.setPremium(untilMillis = ent.expirationDate!!.time, kind = if (ent.periodType == PeriodType.TRIAL) "trial" else "paid")
+TTMailer.setLifetimePremium()
+```
+
+A date in the past says the premium ended. Each is sent once, again only when it changes.
+
+The purchases are not verified with Google: anyone could send any premium for their own installation (never for another
+user). That is fine for marketing audiences; never grant anything because of them.
+
+## 9. Reset and account deletion
 
 ```kotlin
 TTMailer.deleteContact()   // suspend; the user deleted their account in the app (GDPR erasure)
@@ -262,7 +320,7 @@ TTMailer.reset()           // suspend; a "reset app" action, or opting out of TT
 - Both fail on network errors (`Reason.NETWORK`), so the app can retry. Nothing changes locally until TTMailer
   confirms.
 
-## 9. How the SDK behaves
+## 10. How the SDK behaves
 
 - **When it sends.**
   - The installation is sent at start, on every change and when an activity resumes.
@@ -274,7 +332,7 @@ TTMailer.reset()           // suspend; a "reset app" action, or opting out of TT
   - Updates never fail from the app's point of view; the SDK keeps the state and sends it later.
   - A failed send is retried with a growing pause (30 s, doubling up to an hour) while the app runs, and again on the
     next start.
-  - Opens are queued.
+  - Opens, tags and the premium are queued and sent after the installation.
 - **An unknown or disabled key** (404) is retried after a day, not on every start.
 - **Storage.** `SharedPreferences` named `com.tappytaps.ttmailer.sdk`.
   - Uninstalling the app clears it; a reinstall is a new installation.
@@ -292,9 +350,9 @@ TTMailer.reset()           // suspend; a "reset app" action, or opting out of TT
 - **Threads.** One background thread for the SDK's work; callbacks run on the main thread. Nothing blocks the caller.
 - **Size.** No dependencies, no WorkManager, no services: the app calls the SDK where it wants to.
 
-## 10. Privacy
+## 11. Privacy
 
-The SDK sends only what is listed in section 9, plus an e-mail address the user types for the newsletter. It does not
+The SDK sends only what is listed in section 10, plus an e-mail address the user types for the newsletter. It does not
 use the advertising id.
 
 For the Google Play *Data safety* form:
@@ -305,10 +363,11 @@ For the Google Play *Data safety* form:
 | Email address (only with the newsletter) | yes | no | App functionality, marketing |
 | User IDs (only with `setUserId`) | yes | no | App functionality |
 | App interactions (push opens) | yes | no | Analytics |
+| Purchase history (only with the premium, automatic or `setPremium`) | yes | no | Marketing |
 
 Data is encrypted in transit (HTTPS). Users can ask for deletion; the app does that with `deleteContact()`.
 
-## 11. Testing and troubleshooting
+## 12. Testing and troubleshooting
 
 - **Does TTMailer see the installation?** In TTMailer → Kontakty, find the contact with external id
   `sdk:i:<installation id>`, or `sdk:u:<user id>` after a sign-in. It should have a device `sdk:<installation id>`.
@@ -323,7 +382,7 @@ Data is encrypted in transit (HTTPS). Users can ask for deletion; the app does t
 - **Everything fails with a 404.** The key is wrong, rotated or disabled, or the project is archived.
 - **A test server.** `TTMailer.configure(this, appKey = "…", baseUrl = "https://…")` with a key from that server.
 
-## 12. API reference
+## 13. API reference
 
 All on the `TTMailer` object (`@JvmStatic`).
 
@@ -338,6 +397,11 @@ All on the `TTMailer` object (`@JvmStatic`).
 | `reset(callback)` / `suspend reset()` | Removes this installation and starts a new one. |
 | `deleteContact(callback)` / `suspend deleteContact()` | Erases the user's contact (account deletion). |
 | `installationId: String?` | The current installation id (`null` before `configure`). |
+| `setLanguage(language: String?)` | The app's own language; `null` = the system's. |
+| `addTags(tags: List<String>)` / `removeTags(tags: List<String>)` | Tags of the user's contact. |
+| `setPremium(untilMillis, kind?, startedAtMillis?)` | The premium as the app knows it. |
+| `setLifetimePremium(kind, startedAtMillis?)` | A lifetime premium. |
+| `enableAutomaticPurchases(lifetimeProductIds)` | The premium read from Play Billing (off by default). |
 
 `TTMailerException.reason`:
 
@@ -351,7 +415,7 @@ All on the `TTMailer` object (`@JvmStatic`).
 | `NETWORK` | No connection or a timeout. |
 | `SERVER` | Any other answer (`status`, `code`). |
 
-## 13. The server API
+## 14. The server API
 
 The SDK is a thin client of TTMailer's public SDK API. Every call carries the header `X-TTMailer-App-Key`.
 

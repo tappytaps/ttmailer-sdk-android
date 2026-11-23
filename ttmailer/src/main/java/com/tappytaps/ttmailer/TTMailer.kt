@@ -28,6 +28,9 @@ object TTMailer {
     @Volatile private var retryDelaySec = 30L
     @Volatile private var retryScheduled = false
     @Volatile private var callbacksRegistered = false
+    @Volatile private var appContext: Context? = null
+    @Volatile private var lifetimeProducts: Set<String>? = null
+    @Volatile private var lastStoreReadAt = 0L
 
     /**
      * Starts the SDK with the app key from TTMailer (Nastavení → Aplikace (SDK)).
@@ -38,12 +41,13 @@ object TTMailer {
     @JvmStatic @JvmOverloads
     fun configure(context: Context, appKey: String, baseUrl: String = "https://mailer.tappytaps.com", linkKey: String = "redirectUrl") {
         val app = context.applicationContext
+        appContext = app
         engine = Engine(appKey, baseUrl, linkKey, UrlConnectionTransport(), PrefsStore(app), { DeviceInfo.current(app) })
         onWorker { it.syncAndFlush() }
         if (!callbacksRegistered && app is Application) {
             callbacksRegistered = true
             app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
-                override fun onActivityResumed(activity: Activity) = onWorker { it.syncAndFlush() }
+                override fun onActivityResumed(activity: Activity) = onWorker { it.readStore(); it.syncAndFlush() }
                 override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
                 override fun onActivityStarted(activity: Activity) {}
                 override fun onActivityPaused(activity: Activity) {}
@@ -68,6 +72,46 @@ object TTMailer {
      * UUID): it joins this installation with the user's other devices.
      */
     @JvmStatic fun setUserId(userId: String?) = onWorker { it.setUserId(userId); it.syncAndFlush() }
+
+    /**
+     * The language the user chose in the app, when it differs from the system's (e.g. "de" or "pt-BR"); null goes back
+     * to the system language. TTMailer writes to the user in it. Kept between launches.
+     */
+    @JvmStatic fun setLanguage(language: String?) = onWorker { it.setLanguage(language); it.syncAndFlush() }
+
+    /** Adds tags to the user's contact in TTMailer (for audiences), e.g. `listOf("sportovec")`. Keys: a-z, 0-9, _ and -,
+     * 40 at most (uppercase is lowered). Kept and sent when the device is online. */
+    @JvmStatic fun addTags(tags: List<String>) = onWorker { it.addTags(tags); it.syncAndFlush() }
+
+    /** Removes tags from the user's contact in TTMailer. */
+    @JvmStatic fun removeTags(tags: List<String>) = onWorker { it.removeTags(tags); it.syncAndFlush() }
+
+    /**
+     * The user's premium as the app knows it (e.g. from RevenueCat): until when (ms), its kind (`paid`, `trial`,
+     * `offer`…) and when it started. A time in the past says it ended. Sent once, again only when it changes.
+     */
+    @JvmStatic @JvmOverloads
+    fun setPremium(untilMillis: Long, kind: String? = null, startedAtMillis: Long? = null) =
+        onWorker { it.setPremium(PremiumReport(untilMillis, false, kind, startedAtMillis, null)); it.syncAndFlush() }
+
+    /** A lifetime premium (a one-time purchase that unlocks the app for good). */
+    @JvmStatic @JvmOverloads
+    fun setLifetimePremium(kind: String = "lifetime", startedAtMillis: Long? = null) =
+        onWorker { it.setPremium(PremiumReport(null, true, kind, startedAtMillis, null)); it.syncAndFlush() }
+
+    /**
+     * Turns on the automatic premium (off by default): at launch and whenever the app comes to the foreground the SDK
+     * reads the user's purchases from Play Billing (the app's own Play Billing library, 7 or newer) and tells TTMailer
+     * the active subscription (premium until its next renewal, kind `paid`) and the one-time products owned (tags
+     * `koupeno_<product>`). Products in [lifetimeProductIds] make a lifetime premium. Call it after [configure] on every
+     * launch. Use it or [setPremium], not both. Without Play Billing in the app it does nothing.
+     */
+    @JvmStatic @JvmOverloads
+    fun enableAutomaticPurchases(lifetimeProductIds: Set<String> = emptySet()) {
+        lifetimeProducts = lifetimeProductIds
+        lastStoreReadAt = 0
+        onWorker { it.readStore(); it.syncAndFlush() }
+    }
 
     /**
      * Call when the user opens a notification: `RemoteMessage.data`, or the extras of the launch intent (FCM puts the
@@ -115,8 +159,18 @@ object TTMailer {
         worker.execute { try { block(e) } catch (_: Exception) { scheduleRetry() } }
     }
 
+    /** The store's purchases, at most every 5 s (a resume follows every screen; Play answers from its local cache). */
+    private fun Engine.readStore() {
+        val products = lifetimeProducts ?: return
+        val ctx = appContext ?: return
+        val t = System.currentTimeMillis()
+        if (t - lastStoreReadAt < 5_000) return
+        lastStoreReadAt = t
+        BillingReader.entitlements(ctx, t)?.let { storeEntitlements(it, products) }
+    }
+
     private fun Engine.syncAndFlush() {
-        val ok = sync() and flushOpens()
+        val ok = sync() and flushOpens() and flushChanges()
         if (ok) retryDelaySec = 30 else scheduleRetry()
     }
 

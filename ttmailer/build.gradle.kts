@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "com.tappytaps"
-version = "0.1.0"
+version = "0.2.0"
 
 android {
     namespace = "com.tappytaps.ttmailer"
@@ -33,6 +33,8 @@ kotlin {
 }
 
 dependencies {
+    // Only for the automatic purchases (TTM-585): the app brings its own Play Billing; without it the feature is off.
+    compileOnly("com.android.billingclient:billing:7.1.1")
     testImplementation("junit:junit:4.13.2")
 }
 

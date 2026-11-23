@@ -15,7 +15,7 @@ Through JitPack (built from the tags of https://github.com/tappytaps/ttmailer-sd
 // settings.gradle.kts
 dependencyResolutionManagement { repositories { google(); mavenCentral(); maven { url = uri("https://jitpack.io") } } }
 // app/build.gradle.kts
-dependencies { implementation("com.github.tappytaps:ttmailer-sdk-android:0.1.0") }
+dependencies { implementation("com.github.tappytaps:ttmailer-sdk-android:0.2.0") }
 ```
 
 ## Use
@@ -54,6 +54,15 @@ val link = TTMailer.opened(intent.extras)   // the push's link, if any (deep lin
 
 // The user deleted their account (GDPR):
 TTMailer.deleteContact()   // suspend; or deleteContact { result -> … }
+
+// The app's own language, tags for audiences:
+TTMailer.setLanguage("de")
+TTMailer.addTags(listOf("sportovec"))
+
+// Premium: read from Play Billing (off by default; the app's own Play Billing 7+) …
+TTMailer.enableAutomaticPurchases(setOf("pro_lifetime"))
+// … or reported by the app (e.g. from RevenueCat):
+TTMailer.setPremium(untilMillis = expiration, kind = "paid")
 ```
 
 ### What the SDK sends

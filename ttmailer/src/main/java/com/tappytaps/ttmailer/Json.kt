@@ -7,6 +7,7 @@ internal object Json {
     private fun value(v: Any?): String = when (v) {
         null -> "null"
         is Boolean, is Int, is Long -> v.toString()
+        is List<*> -> v.joinToString(",", "[", "]") { value(it) }
         else -> str(v.toString())
     }
 

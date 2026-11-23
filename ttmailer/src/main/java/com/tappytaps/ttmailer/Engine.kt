@@ -30,12 +30,21 @@ internal class Engine(
         const val LAST_AT = "lastSentAt"
         const val DEAD_KEY_AT = "deadKeyAt"
         const val OPENS = "pendingOpens"
+        const val LANGUAGE = "language"
+        const val TAGS = "pendingTags"
+        const val PREMIUM = "pendingPremium"
+        const val SENT_PREMIUM = "sentPremium"
     }
 
     companion object {
         /** An unchanged installation is still sent once a day (the contact's "last active in the app"). */
         const val RESEND_AFTER_MS = 24L * 3600 * 1000
         const val MAX_PENDING_OPENS = 100
+        /** Tags per request (the server takes 20 in each list). */
+        const val TAGS_PER_CALL = 20
+
+        internal fun iso(ms: Long): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+            .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(ms))
     }
 
     @Volatile var installationId: String = store.get(K.INSTALLATION)?.takeIf { it.isNotEmpty() } ?: newId()
@@ -63,6 +72,14 @@ internal class Engine(
         sync()
     }
 
+    /** The app's own language (TTM-584); null = the system's. */
+    @Synchronized fun setLanguage(language: String?) {
+        val l = language?.trim()?.takeIf { it.isNotEmpty() }
+        if (store.get(K.LANGUAGE) == l) return
+        store.set(K.LANGUAGE, l)
+        sync()
+    }
+
     private fun change(key: String, value: String) {
         if (store.get(key) == value) return
         store.set(key, value)
@@ -72,7 +89,7 @@ internal class Engine(
     private fun body(): String {
         val info = deviceInfo()
         val b = LinkedHashMap<String, Any?>()
-        info.language?.let { b["language"] = it }
+        (store.get(K.LANGUAGE) ?: info.language)?.let { b["language"] = it }
         info.timeZone?.let { b["timeZone"] = it }
         info.appVersion?.let { b["appVersion"] = it }
         info.osVersion?.let { b["osVersion"] = it }
@@ -99,6 +116,70 @@ internal class Engine(
             else -> false
         }
     }
+
+    // Tags and premium (TTM-584, TTM-585)
+
+    val pendingTagCount: Int @Synchronized get() = loadTags().size
+
+    @Synchronized fun addTags(tags: List<String>) = changeTags(tags, true)
+    @Synchronized fun removeTags(tags: List<String>) = changeTags(tags, false)
+
+    private fun changeTags(tags: List<String>, add: Boolean) {
+        val clean = tags.map { it.trim().lowercase(Locale.ROOT) }.filter { it.isNotEmpty() && '\t' !in it && '\n' !in it }
+        if (clean.isEmpty()) return
+        saveTags(loadTags() + clean.associateWith { add })
+    }
+
+    /** The premium the app or the store reading reports; sent once, again only when it changes. */
+    @Synchronized fun setPremium(report: PremiumReport) {
+        val pending = PremiumReport.parse(store.get(K.PREMIUM))
+        if (pending == null && report == PremiumReport.parse(store.get(K.SENT_PREMIUM))) return
+        store.set(K.PREMIUM, report.line())
+    }
+
+    /** What the store says now (automatic purchases): a report when it differs from the last one sent. */
+    @Synchronized internal fun storeEntitlements(entitlements: List<Entitlement>, lifetimeProducts: Set<String>) {
+        val previous = PremiumReport.parse(store.get(K.PREMIUM)) ?: PremiumReport.parse(store.get(K.SENT_PREMIUM))
+        PremiumReport.from(entitlements, lifetimeProducts, previous, now())?.let { setPremium(it) }
+    }
+
+    /** Sends waiting tag changes and the premium after the installation. False: something waits for a retry. */
+    @Synchronized fun flushChanges(): Boolean {
+        if (loadTags().isEmpty() && store.get(K.PREMIUM) == null) return true
+        if (!sync()) return false
+        while (true) {
+            val tags = loadTags()
+            if (tags.isEmpty()) break
+            val add = tags.filterValues { it }.keys.sorted().take(TAGS_PER_CALL)
+            val remove = tags.filterValues { !it }.keys.sorted().take(TAGS_PER_CALL)
+            val r = request("POST", "/sdk/v1/installations/$installationId/tags", Json.encode(linkedMapOf("add" to add, "remove" to remove)))
+            if (!handled(r)) return false
+            saveTags(tags - add.toSet() - remove.toSet())
+        }
+        val line = store.get(K.PREMIUM) ?: return true
+        val p = PremiumReport.parse(line) ?: run { store.set(K.PREMIUM, null); return true }
+        val r = request("POST", "/sdk/v1/installations/$installationId/premium", p.json())
+        if (!handled(r)) return false
+        if (r!!.code in 200..299) store.set(K.SENT_PREMIUM, line)
+        store.set(K.PREMIUM, null)
+        return true
+    }
+
+    /** True when the change is done with: sent, or refused for good (a 4xx). False: kept for later (network, 5xx,
+     * 408/429, or TTMailer does not know the installation: it is sent again first). */
+    private fun handled(r: HttpResponse?): Boolean {
+        if (r == null) return false
+        if (r.code in 200..299) return true
+        if (r.code == 409 && Json.parseObject(r.body)["error"] == "unknown_installation") { store.set(K.LAST_BODY, null); return false }
+        return !(r.code >= 500 || r.code == 408 || r.code == 429)
+    }
+
+    private fun loadTags(): Map<String, Boolean> = store.get(K.TAGS)?.split('\n')?.mapNotNull { line ->
+        val p = line.split('\t'); if (p.size == 2) p[0] to (p[1] == "1") else null
+    }?.toMap() ?: emptyMap()
+
+    private fun saveTags(tags: Map<String, Boolean>) =
+        store.set(K.TAGS, if (tags.isEmpty()) null else tags.entries.joinToString("\n") { "${it.key}\t${if (it.value) "1" else "0"}" })
 
     // Push opens
 
@@ -139,7 +220,7 @@ internal class Engine(
         // The installation first, so the confirmed address joins this installation's contact.
         sync()
         val b = linkedMapOf<String, Any?>("email" to email.trim())
-        (language ?: deviceInfo().language)?.let { b["language"] = it }
+        (language ?: store.get(K.LANGUAGE) ?: deviceInfo().language)?.let { b["language"] = it }
         val r = check(request("POST", "/sdk/v1/installations/$installationId/subscribe", Json.encode(b)))
         return Json.parseObject(r.body)["confirm"] as? Boolean ?: true
     }
@@ -159,7 +240,7 @@ internal class Engine(
     private fun newInstallation() {
         installationId = UUID.randomUUID().toString()
         store.set(K.INSTALLATION, installationId)
-        listOf(K.TOKEN, K.ENABLED, K.USER_SET, K.USER, K.LAST_BODY, K.LAST_AT, K.DEAD_KEY_AT).forEach { store.set(it, null) }
+        listOf(K.TOKEN, K.ENABLED, K.USER_SET, K.USER, K.LAST_BODY, K.LAST_AT, K.DEAD_KEY_AT, K.TAGS, K.PREMIUM, K.SENT_PREMIUM).forEach { store.set(it, null) }
     }
 
     private fun check(r: HttpResponse?): HttpResponse {
@@ -189,8 +270,6 @@ internal class Engine(
         }
     }
 
-    private fun iso(ms: Long): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
-        .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(ms))
 }
 
 /** The push's link under [key] when it is an absolute URL (a deep link or https). */
