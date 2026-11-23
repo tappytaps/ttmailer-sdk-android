@@ -38,12 +38,12 @@ data class PremiumReport(
 
         /**
          * The report for what the store says now, given the last one sent; null = nothing to tell (never paid).
-         * A lifetime product → lifetime; else the active subscription ending last → until its end; nothing active
+         * A lifetime product ([lifetimeProducts]; null = every one-time product) → lifetime; else the active subscription ending last → until its end; nothing active
          * after a premium → it ended now (a refund, a cancellation), kind and start stay.
          */
-        internal fun from(entitlements: List<Entitlement>, lifetimeProducts: Set<String>, previous: PremiumReport?, now: Long): PremiumReport? {
+        internal fun from(entitlements: List<Entitlement>, lifetimeProducts: Set<String>?, previous: PremiumReport?, now: Long): PremiumReport? {
             val products = entitlements.filter { it.kind == Entitlement.Kind.ONE_TIME }.map { it.productId }.distinct().sorted()
-            entitlements.firstOrNull { it.kind == Entitlement.Kind.ONE_TIME && it.productId in lifetimeProducts }?.let {
+            entitlements.firstOrNull { it.kind == Entitlement.Kind.ONE_TIME && (lifetimeProducts == null || it.productId in lifetimeProducts) }?.let {
                 return PremiumReport(null, true, "lifetime", it.originalPurchaseAt, products)
             }
             entitlements.filter { it.kind == Entitlement.Kind.SUBSCRIPTION && (it.expiresAt ?: 0) > now }.maxByOrNull { it.expiresAt!! }?.let {

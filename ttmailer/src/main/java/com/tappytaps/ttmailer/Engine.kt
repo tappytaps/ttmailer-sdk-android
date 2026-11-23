@@ -140,7 +140,7 @@ internal class Engine(
     }
 
     /** What the store says now (automatic purchases): a report when it differs from the last one sent. */
-    @Synchronized internal fun storeEntitlements(entitlements: List<Entitlement>, lifetimeProducts: Set<String>) {
+    @Synchronized internal fun storeEntitlements(entitlements: List<Entitlement>, lifetimeProducts: Set<String>?) {
         val previous = PremiumReport.parse(store.get(K.PREMIUM)) ?: PremiumReport.parse(store.get(K.SENT_PREMIUM))
         PremiumReport.from(entitlements, lifetimeProducts, previous, now())?.let { setPremium(it) }
     }

@@ -29,6 +29,7 @@ object TTMailer {
     @Volatile private var retryScheduled = false
     @Volatile private var callbacksRegistered = false
     @Volatile private var appContext: Context? = null
+    @Volatile private var automaticPurchases = false
     @Volatile private var lifetimeProducts: Set<String>? = null
     @Volatile private var lastStoreReadAt = 0L
 
@@ -103,12 +104,15 @@ object TTMailer {
      * Turns on the automatic premium (off by default): at launch and whenever the app comes to the foreground the SDK
      * reads the user's purchases from Play Billing (the app's own Play Billing library, 7 or newer) and tells TTMailer
      * the active subscription (premium until its next renewal, kind `paid`) and the one-time products owned (tags
-     * `koupeno_<product>`). Products in [lifetimeProductIds] make a lifetime premium. Call it after [configure] on every
-     * launch. Use it or [setPremium], not both. Without Play Billing in the app it does nothing.
+     * `koupeno_<product>`). Every one-time product makes a lifetime premium; an app that also sells add-ons (e.g. a
+     * theme pack) names the ones that unlock the app in [lifetimeProductIds], the others are only tags. Consumables are
+     * not reported. Call it after [configure] on every launch. Use it or [setPremium], not both. Without Play Billing in
+     * the app it does nothing.
      */
     @JvmStatic @JvmOverloads
-    fun enableAutomaticPurchases(lifetimeProductIds: Set<String> = emptySet()) {
+    fun enableAutomaticPurchases(lifetimeProductIds: Set<String>? = null) {
         lifetimeProducts = lifetimeProductIds
+        automaticPurchases = true
         lastStoreReadAt = 0
         onWorker { it.readStore(); it.syncAndFlush() }
     }
@@ -162,7 +166,8 @@ object TTMailer {
 
     /** The store's purchases, at most every 5 s (a resume follows every screen; Play answers from its local cache). */
     private fun Engine.readStore() {
-        val products = lifetimeProducts ?: return
+        if (!automaticPurchases) return
+        val products = lifetimeProducts
         val ctx = appContext ?: return
         val t = System.currentTimeMillis()
         if (t - lastStoreReadAt < 5_000) return

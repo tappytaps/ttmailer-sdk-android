@@ -74,7 +74,7 @@ dependencyResolutionManagement {
 
 // app/build.gradle.kts
 dependencies {
-    implementation("com.github.tappytaps:ttmailer-sdk-android:0.2.0")
+    implementation("com.github.tappytaps:ttmailer-sdk-android:0.2.1")
 }
 ```
 
@@ -82,7 +82,7 @@ With a version catalog:
 
 ```toml
 [libraries]
-ttmailer = { module = "com.github.tappytaps:ttmailer-sdk-android", version = "0.2.0" }
+ttmailer = { module = "com.github.tappytaps:ttmailer-sdk-android", version = "0.2.1" }
 ```
 
 The library declares the `INTERNET` permission and ships its ProGuard / R8 rules; nothing else is needed. Firebase
@@ -278,14 +278,18 @@ comes to the foreground. The app must use Play Billing 7 or newer (the SDK uses 
 
 ```kotlin
 TTMailer.configure(this, "tta_…")
-TTMailer.enableAutomaticPurchases(setOf("pro_lifetime"))
+TTMailer.enableAutomaticPurchases()
 ```
+
+An app that also sells add-ons (e.g. a theme pack) names the products that unlock the app:
+`enableAutomaticPurchases(setOf("pro_lifetime"))`.
 
 - An active subscription: premium until its next renewal, kind `paid`. Play does not tell the app the end or a free
   trial: the SDK counts the renewal from the purchase by the product's billing period (a month if Play does not say).
   A cancelled subscription is premium until the user opens the app after it lapsed.
-- A product in `lifetimeProductIds`: a lifetime premium.
-- Every one-time product owned: a tag `koupeno_<product>` (lowercase, other characters
+- A one-time purchase that unlocks the app: a lifetime premium. Without `lifetimeProductIds` that is every
+  non-consumable; with it only the products listed.
+- Every one-time product owned (acknowledged; consumables are not reported): a tag `koupeno_<product>` (lowercase, other characters
   `_`), e.g. `koupeno_themes_pack`. A refunded product loses its tag.
 - A refunded product or subscription ends the premium the next time the app is opened.
 - Consumables (coins, credits) are not reported.
@@ -401,7 +405,7 @@ All on the `TTMailer` object (`@JvmStatic`).
 | `addTags(tags: List<String>)` / `removeTags(tags: List<String>)` | Tags of the user's contact. |
 | `setPremium(untilMillis, kind?, startedAtMillis?)` | The premium as the app knows it. |
 | `setLifetimePremium(kind, startedAtMillis?)` | A lifetime premium. |
-| `enableAutomaticPurchases(lifetimeProductIds)` | The premium read from Play Billing (off by default). |
+| `enableAutomaticPurchases(lifetimeProductIds: Set<String>? = null)` | The premium read from Play Billing (off by default). |
 
 `TTMailerException.reason`:
 

@@ -80,6 +80,11 @@ class ChangesTest {
         assertNull(subscriptionEnd(bought, "nonsense", now))
     }
 
+    @Test fun withoutAListEveryOneTimeProductIsLifetime() {
+        val pro = Entitlement("pro", Entitlement.Kind.ONE_TIME, null, now, false)
+        assertEquals(PremiumReport(null, true, "lifetime", now, listOf("pro")), PremiumReport.from(listOf(pro), null, null, now))
+    }
+
     @Test fun reportFromTheStore() {
         val start = now - 40 * day
         val sub = Entitlement("m", Entitlement.Kind.SUBSCRIPTION, now + 20 * day, start, false)

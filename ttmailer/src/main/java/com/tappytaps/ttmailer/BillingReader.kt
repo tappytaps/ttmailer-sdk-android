@@ -56,7 +56,8 @@ internal object BillingReader {
                 val end = subscriptionEnd(p.purchaseTime, periods[id] ?: DEFAULT_PERIOD, now)
                 out += Entitlement(id, Entitlement.Kind.SUBSCRIPTION, end, p.purchaseTime, false)
             }
-            for (p in inapp) for (id in p.products) out += Entitlement(id, Entitlement.Kind.ONE_TIME, null, p.purchaseTime, false)
+            // Only acknowledged ones: a consumable (coins) is consumed, never acknowledged, and is not an unlock.
+            for (p in inapp.filter { it.isAcknowledged }) for (id in p.products) out += Entitlement(id, Entitlement.Kind.ONE_TIME, null, p.purchaseTime, false)
             return out
         } catch (_: Throwable) {
             return null
