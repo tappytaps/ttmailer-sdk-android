@@ -42,6 +42,7 @@ internal class Engine(
         const val MAX_PENDING_OPENS = 100
         /** Tags per request (the server takes 20 in each list). */
         const val TAGS_PER_CALL = 20
+        private val TAG = Regex("^[a-z0-9_-]{1,40}$")
 
         internal fun iso(ms: Long): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
             .apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(ms))
@@ -125,7 +126,8 @@ internal class Engine(
     @Synchronized fun removeTags(tags: List<String>) = changeTags(tags, false)
 
     private fun changeTags(tags: List<String>, add: Boolean) {
-        val clean = tags.map { it.trim().lowercase(Locale.ROOT) }.filter { it.isNotEmpty() && '\t' !in it && '\n' !in it }
+        // What TTMailer takes (a-z 0-9 _ -, 40 at most): one bad tag must not lose the others of its request.
+        val clean = tags.map { it.trim().lowercase(Locale.ROOT) }.filter { TAG.matches(it) }
         if (clean.isEmpty()) return
         saveTags(loadTags() + clean.associateWith { add })
     }

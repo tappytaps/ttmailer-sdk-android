@@ -156,7 +156,8 @@ object TTMailer {
 
     private fun onWorker(block: (Engine) -> Unit) {
         val e = engine ?: return
-        worker.execute { try { block(e) } catch (_: Exception) { scheduleRetry() } }
+        // Throwable: an error of the app's own libraries (e.g. another Play Billing) must never kill the worker or the app.
+        worker.execute { try { block(e) } catch (_: Throwable) { scheduleRetry() } }
     }
 
     /** The store's purchases, at most every 5 s (a resume follows every screen; Play answers from its local cache). */
@@ -179,7 +180,7 @@ object TTMailer {
         retryScheduled = true
         val delay = retryDelaySec
         retryDelaySec = minOf(retryDelaySec * 2, 3600)
-        worker.schedule({ retryScheduled = false; engine?.let { e -> try { e.syncAndFlush() } catch (_: Exception) {} } }, delay, TimeUnit.SECONDS)
+        worker.schedule({ retryScheduled = false; engine?.let { e -> try { e.syncAndFlush() } catch (_: Throwable) {} } }, delay, TimeUnit.SECONDS)
     }
 
     private fun <T> call(callback: (Result<T>) -> Unit, block: (Engine) -> T) {

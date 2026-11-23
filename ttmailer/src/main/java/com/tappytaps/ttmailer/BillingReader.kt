@@ -18,8 +18,13 @@ import java.util.concurrent.TimeUnit
  * (a month when Play does not say), the kind `paid`.
  */
 internal object BillingReader {
-    /** Is Play Billing in the app (the SDK only compiles against it)? */
-    val available: Boolean by lazy { runCatching { Class.forName("com.android.billingclient.api.BillingClient") }.isSuccess }
+    /** Is Play Billing 7+ in the app (the SDK only compiles against it; PendingPurchasesParams came with 7)? */
+    val available: Boolean by lazy { has("com.android.billingclient.api.BillingClient") && has("com.android.billingclient.api.PendingPurchasesParams") }
+
+    /** Play Billing 8 changed the product details callback: the SDK (built against 7) must not call it there. */
+    private val billing8: Boolean by lazy { has("com.android.billingclient.api.QueryProductDetailsResult") }
+
+    private fun has(name: String) = runCatching { Class.forName(name) }.isSuccess
 
     private const val DEFAULT_PERIOD = "P1M"
     private const val TIMEOUT_S = 20L
@@ -27,10 +32,14 @@ internal object BillingReader {
     /** The purchases now; null when Play could not be asked (no connection to Play, no billing in the app). */
     fun entitlements(context: Context, now: Long): List<Entitlement>? {
         if (!available) return null
-        val client = BillingClient.newBuilder(context)
-            .setListener { _, _ -> }
-            .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
-            .build()
+        val client = try {
+            BillingClient.newBuilder(context)
+                .setListener { _, _ -> }
+                .enablePendingPurchases(PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())
+                .build()
+        } catch (_: Throwable) {
+            return null
+        }
         try {
             val ready = CountDownLatch(1)
             var ok = false
@@ -69,7 +78,7 @@ internal object BillingReader {
     /** The billing period of each subscription (its base plan's recurring phase); empty when Play does not answer, or
      * the app's Play Billing has another API for it (version 8+): then a month. */
     private fun periods(client: BillingClient, ids: List<String>): Map<String, String> {
-        if (ids.isEmpty()) return emptyMap()
+        if (ids.isEmpty() || billing8) return emptyMap()
         return try {
             val done = CountDownLatch(1)
             val out = HashMap<String, String>()

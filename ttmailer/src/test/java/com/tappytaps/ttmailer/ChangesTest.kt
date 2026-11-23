@@ -51,6 +51,12 @@ class ChangesTest {
         assertEquals(0, again.pendingTagCount)
     }
 
+    @Test fun aTagTTMailerWouldRefuseIsDroppedOnTheDeviceNotItsWholeRequest() {
+        val e = engine(FakeTransport(), MemoryStore())
+        e.addTags(listOf("ok", "sport fan", "café", "x".repeat(41)))
+        assertEquals(1, e.pendingTagCount)
+    }
+
     @Test fun setPremiumIsSentOnceUntilItChanges() {
         val t = FakeTransport(); val s = MemoryStore()
         val e = engine(t, s)
