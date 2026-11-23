@@ -46,7 +46,7 @@ publishing {
         }
     }
     repositories {
-        // A local repository for checks; the real one (GitHub Packages or another private Maven) is still to be decided.
+        // A local repository for checks; apps get the library through JitPack (README).
         maven { name = "local"; url = uri(rootProject.layout.buildDirectory.dir("repo")) }
     }
 }

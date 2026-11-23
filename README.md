@@ -6,13 +6,13 @@ dependencies, Android 7+ (minSdk 24). The server API is described in `docs/sdk-a
 
 ## Install
 
-The Maven repository is still to be decided (a private one, e.g. GitHub Packages). Then:
+Through JitPack (built from the tags of https://github.com/tappytaps/ttmailer-sdk-android):
 
 ```kotlin
 // settings.gradle.kts
-dependencyResolutionManagement { repositories { maven { url = uri("<repository>") } } }
+dependencyResolutionManagement { repositories { google(); mavenCentral(); maven { url = uri("https://jitpack.io") } } }
 // app/build.gradle.kts
-dependencies { implementation("com.tappytaps:ttmailer:0.1.0") }
+dependencies { implementation("com.github.tappytaps:ttmailer-sdk-android:0.1.0") }
 ```
 
 ## Use
