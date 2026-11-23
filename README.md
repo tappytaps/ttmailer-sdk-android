@@ -2,7 +2,10 @@
 
 For apps without their own backend: registers the installation and its FCM token in TTMailer, signs the user up to the
 newsletter (TTMailer sends a confirmation e-mail), links the app's account and reports opened pushes. Kotlin, no
-dependencies, Android 7+ (minSdk 24). The server API is described in `docs/sdk-api.md` of the TTMailer repository.
+dependencies, Android 7+ (minSdk 24).
+
+**📖 Full guide: [docs/integration.md](docs/integration.md)**: the setup in TTMailer, push, accounts, the newsletter,
+privacy (Data safety), troubleshooting and the API reference.
 
 ## Install
 
