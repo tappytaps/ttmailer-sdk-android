@@ -1,0 +1,2 @@
+-keep class com.tappytaps.ttmailer.TTMailer { public *; }
+-keep class com.tappytaps.ttmailer.TTMailerException { *; }
