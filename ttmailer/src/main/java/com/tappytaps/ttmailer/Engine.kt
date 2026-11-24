@@ -117,8 +117,9 @@ internal class Engine(
         // A key TTMailer does not know (rotated, disabled, a typo): tried again after a day, not on every call.
         store.get(K.DEAD_KEY_AT)?.toLongOrNull()?.let { if (t - it < RESEND_AFTER_MS) return false }
         val lastAt = store.get(K.LAST_AT)?.toLongOrNull()
-        // Unchanged: sent again once a day only while activity is reported (the contact's "last active in the app").
-        if (store.get(K.LAST_BODY) == b && lastAt != null && (store.get(K.TRACK) == "false" || t - lastAt < RESEND_AFTER_MS)) return true
+        // Unchanged: sent again once a day ("last active in the app"; with activity reporting off it only keeps the
+        // installation alive, TTM-588).
+        if (store.get(K.LAST_BODY) == b && lastAt != null && t - lastAt < RESEND_AFTER_MS) return true
         val r = request("PUT", "/sdk/v1/installations/$installationId", b) ?: return false
         return when {
             r.code in 200..299 -> { store.set(K.LAST_BODY, b); store.set(K.LAST_AT, t.toString()); true }

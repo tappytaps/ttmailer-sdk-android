@@ -98,7 +98,7 @@ class ChangesTest {
         assertNull(PremiumReport.from(emptyList(), emptySet(), null, now))
     }
 
-    @Test fun activityTrackingOffSendsFalseAndNoDailyResend() {
+    @Test fun activityTrackingOffSendsFalseAndStillTheDailyKeepAlive() {
         val t = FakeTransport(); val s = MemoryStore()
         val e = engine(t, s)
         e.sync()
@@ -108,7 +108,8 @@ class ChangesTest {
         val count = t.sent.size
         now += 25 * 3_600_000L
         e.sync()
-        assertEquals(count, t.sent.size)
+        assertEquals(count + 1, t.sent.size)
+        assertEquals(false, json(t.sent.last().body)["trackActivity"])
         engine(t, s).setActivityTracking(true)
         assertTrue(!t.sent.last().body!!.contains("trackActivity"))
     }
