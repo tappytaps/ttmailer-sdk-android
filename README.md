@@ -15,7 +15,7 @@ Through JitPack (built from the tags of https://github.com/tappytaps/ttmailer-sd
 // settings.gradle.kts
 dependencyResolutionManagement { repositories { google(); mavenCentral(); maven { url = uri("https://jitpack.io") } } }
 // app/build.gradle.kts
-dependencies { implementation("com.github.tappytaps:ttmailer-sdk-android:0.2.1") }
+dependencies { implementation("com.github.tappytaps:ttmailer-sdk-android:0.3.0") }
 ```
 
 ## Use

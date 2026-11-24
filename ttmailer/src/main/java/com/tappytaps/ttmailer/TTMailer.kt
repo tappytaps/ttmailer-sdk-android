@@ -75,6 +75,13 @@ object TTMailer {
     @JvmStatic fun setUserId(userId: String?) = onWorker { it.setUserId(userId); it.syncAndFlush() }
 
     /**
+     * Whether TTMailer learns when the user last used the app (on by default): the SDK reports it at launch and when the
+     * app comes to the foreground, at most once a day, for audiences like "used the app in the last 30 days". Off: the
+     * installation is still sent when it changes, but never counts as activity. Kept between launches.
+     */
+    @JvmStatic fun setActivityTracking(enabled: Boolean) = onWorker { it.setActivityTracking(enabled); it.syncAndFlush() }
+
+    /**
      * The language the user chose in the app, when it differs from the system's (e.g. "de" or "pt-BR"); null goes back
      * to the system language. TTMailer writes to the user in it. Kept between launches.
      */

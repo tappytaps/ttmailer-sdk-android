@@ -97,4 +97,19 @@ class ChangesTest {
         assertEquals(PremiumReport(now, false, "paid", null, emptyList()), PremiumReport.from(emptyList(), emptySet(), prev, now))
         assertNull(PremiumReport.from(emptyList(), emptySet(), null, now))
     }
+
+    @Test fun activityTrackingOffSendsFalseAndNoDailyResend() {
+        val t = FakeTransport(); val s = MemoryStore()
+        val e = engine(t, s)
+        e.sync()
+        assertTrue(!t.sent.last().body!!.contains("trackActivity"))
+        e.setActivityTracking(false)
+        assertEquals(false, json(t.sent.last().body)["trackActivity"])
+        val count = t.sent.size
+        now += 25 * 3_600_000L
+        e.sync()
+        assertEquals(count, t.sent.size)
+        engine(t, s).setActivityTracking(true)
+        assertTrue(!t.sent.last().body!!.contains("trackActivity"))
+    }
 }

@@ -31,6 +31,7 @@ internal class Engine(
         const val DEAD_KEY_AT = "deadKeyAt"
         const val OPENS = "pendingOpens"
         const val LANGUAGE = "language"
+        const val TRACK = "trackActivity"
         const val TAGS = "pendingTags"
         const val PREMIUM = "pendingPremium"
         const val SENT_PREMIUM = "sentPremium"
@@ -73,6 +74,14 @@ internal class Engine(
         sync()
     }
 
+    /** TTM-588: activity reporting on (default) or off; off is stored as "false". */
+    @Synchronized fun setActivityTracking(enabled: Boolean) {
+        val v = if (enabled) null else "false"
+        if (store.get(K.TRACK) == v) return
+        store.set(K.TRACK, v)
+        sync()
+    }
+
     /** The app's own language (TTM-584); null = the system's. */
     @Synchronized fun setLanguage(language: String?) {
         val l = language?.trim()?.takeIf { it.isNotEmpty() }
@@ -97,6 +106,7 @@ internal class Engine(
         store.get(K.TOKEN)?.let { b["pushToken"] = it }
         store.get(K.ENABLED)?.let { b["pushEnabled"] = it == "true" }
         if (store.get(K.USER_SET) == "true") b["userId"] = store.get(K.USER)
+        if (store.get(K.TRACK) == "false") b["trackActivity"] = false
         return Json.encode(b)
     }
 
@@ -107,7 +117,8 @@ internal class Engine(
         // A key TTMailer does not know (rotated, disabled, a typo): tried again after a day, not on every call.
         store.get(K.DEAD_KEY_AT)?.toLongOrNull()?.let { if (t - it < RESEND_AFTER_MS) return false }
         val lastAt = store.get(K.LAST_AT)?.toLongOrNull()
-        if (store.get(K.LAST_BODY) == b && lastAt != null && t - lastAt < RESEND_AFTER_MS) return true
+        // Unchanged: sent again once a day only while activity is reported (the contact's "last active in the app").
+        if (store.get(K.LAST_BODY) == b && lastAt != null && (store.get(K.TRACK) == "false" || t - lastAt < RESEND_AFTER_MS)) return true
         val r = request("PUT", "/sdk/v1/installations/$installationId", b) ?: return false
         return when {
             r.code in 200..299 -> { store.set(K.LAST_BODY, b); store.set(K.LAST_AT, t.toString()); true }

@@ -74,7 +74,7 @@ dependencyResolutionManagement {
 
 // app/build.gradle.kts
 dependencies {
-    implementation("com.github.tappytaps:ttmailer-sdk-android:0.2.1")
+    implementation("com.github.tappytaps:ttmailer-sdk-android:0.3.0")
 }
 ```
 
@@ -82,7 +82,7 @@ With a version catalog:
 
 ```toml
 [libraries]
-ttmailer = { module = "com.github.tappytaps:ttmailer-sdk-android", version = "0.2.1" }
+ttmailer = { module = "com.github.tappytaps:ttmailer-sdk-android", version = "0.3.0" }
 ```
 
 The library declares the `INTERNET` permission and ships its ProGuard / R8 rules; nothing else is needed. Firebase
@@ -268,6 +268,19 @@ Tags of the user's contact, for audiences in TTMailer (e.g. people who use one f
 40 at most; uppercase is lowered. They wait offline and are sent with the installation. A tag the SDK adds can be
 removed by the team in TTMailer and vice versa.
 
+### App activity
+
+TTMailer learns when the user last used the app: the SDK reports it at launch and when the app becomes active, at most
+once a day. On by default; audiences in TTMailer can then pick e.g. "used the app in the last 30 days". To turn it off
+(e.g. when the user opts out of analytics):
+
+```kotlin
+TTMailer.setActivityTracking(false)
+```
+
+Kept between launches. Off, the installation is still sent when it changes (token, switch, language), but never counts
+as activity.
+
 ### Premium (purchases)
 
 TTMailer keeps the user's premium (until when, its kind, since when) for audiences like "trial ended, did not buy".
@@ -401,6 +414,7 @@ All on the `TTMailer` object (`@JvmStatic`).
 | `reset(callback)` / `suspend reset()` | Removes this installation and starts a new one. |
 | `deleteContact(callback)` / `suspend deleteContact()` | Erases the user's contact (account deletion). |
 | `installationId: String?` | The current installation id (`null` before `configure`). |
+| `setActivityTracking(enabled: Boolean)` | App activity reporting (on by default). |
 | `setLanguage(language: String?)` | The app's own language; `null` = the system's. |
 | `addTags(tags: List<String>)` / `removeTags(tags: List<String>)` | Tags of the user's contact. |
 | `setPremium(untilMillis, kind?, startedAtMillis?)` | The premium as the app knows it. |
