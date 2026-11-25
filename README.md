@@ -2,7 +2,8 @@
 
 For apps without their own backend: registers the installation and its FCM token in TTMailer, signs the user up to the
 newsletter (TTMailer sends a confirmation e-mail), links the app's account, reports opened pushes and does their tap action (browser, Custom Tabs or an in-app message).
-Kotlin, one dependency (`androidx.browser`, for Custom Tabs), Android 7+ (minSdk 24).
+Kotlin, one direct dependency (`androidx.browser` for Custom Tabs, with a few small AndroidX libraries), Android 7+
+(minSdk 24); the app needs AndroidX and compileSdk 34+.
 
 **📖 Full guide: [docs/integration.md](docs/integration.md)**: the setup in TTMailer, push, accounts, the newsletter,
 privacy (Data safety), troubleshooting and the API reference.
@@ -52,9 +53,10 @@ lifecycleScope.launch {
 // or RemoteMessage.data when you build the notification yourself):
 // handle() reports the open and does the push's action (TTMailer: Po klepnutí): the browser, Custom Tabs or an in-app
 // message (it then returns null); for a plain push it returns the link (deep link or web) for the app to open.
-// Call it once per tap on the main thread (onCreate with savedInstanceState == null, and onNewIntent).
+// Call it once per tap on the main thread (onCreate with savedInstanceState == null, and onNewIntent), from the
+// activity that stays (not a splash/trampoline that finishes).
 TTMailer.handle(this, intent.extras)?.let { link -> Router.open(this, Uri.parse(link)) }
-// Deep links from an in-app message (without it, the system opens them):
+// The app's own links from an in-app message (set it in Application.onCreate; without it, the system opens them):
 TTMailer.onDeepLink = { link -> Router.open(currentActivity, Uri.parse(link)) }
 // TTMailer.opened(intent.extras) still works (the open and the link), but ignores the action.
 

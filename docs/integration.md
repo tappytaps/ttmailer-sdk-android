@@ -34,8 +34,8 @@ to TTMailer from that backend. Apps without a backend use this SDK instead:
 - **Rich push (0.4.0).** A push can open a web page in the browser or in Custom Tabs, or show an in-app message
   written in TTMailer, without any code in the app beyond `TTMailer.handle`.
 
-The SDK is written in Kotlin. Its only dependency is `androidx.browser` (Custom Tabs, for the rich push); it does not
-even depend on Firebase, the app passes the token. It supports Android 7+ (minSdk 24) and can be called from Kotlin (callbacks or coroutines) and Java.
+The SDK is written in Kotlin. Its only direct dependency is `androidx.browser` (Custom Tabs, for the rich push; it
+brings a few small AndroidX libraries, see section 3); it does not even depend on Firebase, the app passes the token. It supports Android 7+ (minSdk 24) and can be called from Kotlin (callbacks or coroutines) and Java.
 
 ## 2. Set up the app in TTMailer
 
@@ -88,9 +88,17 @@ ttmailer = { module = "com.github.tappytaps:ttmailer-sdk-android", version = "0.
 ```
 
 The library declares the `INTERNET` permission, the in-app message activity and a `<queries>` entry for Custom Tabs,
-and ships its ProGuard / R8 rules; nothing else is needed. It brings `androidx.browser:browser:1.8.0` (Gradle
-resolves a newer one if the app has it). Firebase
-Messaging is added by the app as usual (`com.google.firebase:firebase-messaging`).
+and ships its ProGuard / R8 rules; nothing else is needed. Firebase Messaging is added by the app as usual
+(`com.google.firebase:firebase-messaging`).
+
+Requirements: the app uses AndroidX (`android.useAndroidX=true`) and `compileSdk` 34 or higher (`androidx.browser`
+1.8.0 needs it); minSdk stays 24. The SDK brings, besides the Kotlin standard library (Gradle resolves newer versions
+the app already has):
+
+- `androidx.browser:browser:1.8.0`, which pulls in
+- `androidx.core:core:1.1.0` (with `lifecycle-runtime`, `versionedparcelable`), `androidx.annotation`,
+  `androidx.annotation-experimental`, `androidx.collection`, `androidx.concurrent:concurrent-futures`,
+  `androidx.interpolator` and `com.google.guava:listenablefuture:1.0` (an empty placeholder artifact).
 
 ## 4. Start the SDK
 
@@ -192,6 +200,11 @@ class MainActivity : AppCompatActivity() {
 Call `handle` once per tap, on the main thread: with `savedInstanceState == null` in `onCreate`, so a rotation does not
 open the message again.
 
+**A trampoline or splash activity** (one that routes and finishes at once): call `handle` from the activity that stays,
+after the routing, and pass the push's extras on to it. Then the message, the browser or the Custom Tab opens over the
+app's screen, and Back returns to it. If `handle` gets an activity that is already finishing, the SDK still does the
+action, from the application context in a new task (and logs a warning, tag `TTMailer`).
+
 **The app is in the foreground.** `onMessageReceived` gets the push, and the app shows its own notification. Put the
 data into the notification's intent, then handle it the same way:
 
@@ -223,22 +236,32 @@ browser and in-app browser pushes still work (the link), but a message opens as 
 A push with *Zpráva v aplikaci* shows a page written in TTMailer (`ttmUrl`, `…/p/m/<token>`) in the SDK's own
 full-screen activity, `TTMailerMessageActivity`, over the activity passed to `handle`:
 
-- A close button at the top, Back closes it too. The colours follow the system's light or dark mode.
-- JavaScript is off. The first load carries the header `X-TTMailer-SDK: <version>` (TTMailer then shows the message's
-  close links, `ttmailer://close`).
-- No network, or an error answer (HTTP 400 and above): an error with *Zkusit znovu* / *Try again*.
-- Links:
-  - pages on the TTMailer server (the click redirects, so the click is counted) stay in the message;
-  - `ttmailer://close` closes the message;
+- A close button at the top. Back first walks back through the TTMailer pages opened from the message (rare), then
+  closes it. The colours follow the system's light or dark mode.
+- JavaScript is off. Every load of a TTMailer page carries the header `X-TTMailer-SDK: <version>` (TTMailer then shows
+  the message's close links, `ttmailer://close`). The message is loaded afresh after a rotation, a theme change or
+  process death.
+- No network, a TLS error, an error answer (HTTP 400 and above), or nothing after 25 s on the first load: an error with
+  *Zkusit znovu* / *Try again*. An error after the message was shown never replaces it (a short notice instead).
+- Links (only a tap or a server redirect leaves the message; frames never leave or close it):
+  - TTMailer's https pages (the SDK's base URL host and the message's own host; the click redirects, so the click is
+    counted) stay in the message;
+  - `ttmailer://close` closes the message; other `ttmailer://` links do nothing;
   - a store link opens the store, another web page opens in Custom Tabs; the message stays open below;
-  - a deep link (any other scheme, e.g. `myapp://premium`) closes the message, then goes to `TTMailer.onDeepLink`:
+  - a link to one of the app's own schemes (one the app's activities take, e.g. `myapp://premium`) closes the
+    message, then goes to `TTMailer.onDeepLink`;
+  - other schemes (`mailto:`, `tel:`, `sms:`, `geo:`…) open through the system, and `intent:` links open the app they
+    name (or their fallback); the message stays open;
+  - `javascript:`, `data:`, `blob:`, `file:`, `content:` and `about:` links do nothing.
+
+Set `onDeepLink` once in `Application.onCreate`, after `configure`, so it is there also when the app starts from the
+push:
 
 ```kotlin
-// Application.onCreate, after configure:
 TTMailer.onDeepLink = { link -> Router.open(currentActivity, Uri.parse(link)) }
 ```
 
-  Without `onDeepLink` the system opens the deep link (the app's own intent filters, like a link from another app).
+Without `onDeepLink` the system opens the app's link (the app's own intent filters, like a link from another app).
 
 ## 6. User accounts
 
@@ -414,7 +437,7 @@ TTMailer.reset()           // suspend; a "reset app" action, or opting out of TT
   ```
 
 - **Threads.** One background thread for the SDK's work; callbacks run on the main thread. Nothing blocks the caller.
-- **Size.** One small dependency (`androidx.browser`), no WorkManager, no services: the app calls the SDK where it
+- **Size.** One direct dependency (`androidx.browser`, section 3), no WorkManager, no services: the app calls the SDK where it
   wants to. The in-app message is a plain `Activity` with a system `WebView`; no AppCompat.
 
 ## 11. Privacy

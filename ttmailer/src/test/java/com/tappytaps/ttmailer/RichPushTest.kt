@@ -86,33 +86,93 @@ class RichPushTest {
 
     // Navigation in the message
 
-    @Test fun ttmailerPagesStayInTheWebView() {
-        assertEquals(Nav.Stay, RichPush.navigation("https://mailer.example.com/r/abc?u=https%3A%2F%2Fexample.com", hosts))
-        assertEquals(Nav.Stay, RichPush.navigation("https://MAILER.example.com:443/p/m/tok", hosts))
-        assertEquals(Nav.Stay, RichPush.navigation("about:blank", hosts))
+    private val appSchemes = setOf("myapp")
+    private fun nav(url: String?) = RichPush.navigation(url, hosts) { it in appSchemes }
+    private fun decide(url: String?, main: Boolean = true, gesture: Boolean = true, redirect: Boolean = false) =
+        RichPush.decide(url, main, gesture, redirect, hosts) { it in appSchemes }
+
+    @Test fun ttmailerHttpsPagesStayInTheWebView() {
+        val r = "https://mailer.example.com/r/abc?u=https%3A%2F%2Fexample.com"
+        assertEquals(Nav.Stay(r), nav(r))
+        assertEquals(Nav.Stay("https://MAILER.example.com:443/p/m/tok"), nav("https://MAILER.example.com:443/p/m/tok"))
+    }
+
+    @Test fun plainHttpToTheTtmailerHostIsNotTtmailer() {
+        assertEquals(Nav.InApp("http://mailer.example.com/r/abc"), nav("http://mailer.example.com/r/abc"))
+        assertFalse(RichPush.isTtmailerPage("http://mailer.example.com/", hosts))
+        assertFalse(RichPush.isTtmailerPage("https://sub.mailer.example.com/", hosts))
     }
 
     @Test fun theMessagesOwnHostCountsAsTtmailer() {
         val h = RichPush.ttmailerHosts("https://api.example.com", "https://news.example.com/p/m/tok")
         assertEquals(setOf("api.example.com", "news.example.com"), h)
-        assertEquals(Nav.Stay, RichPush.navigation("https://news.example.com/r/x", h))
+        assertEquals(Nav.Stay("https://news.example.com/r/x"), RichPush.navigation("https://news.example.com/r/x", h) { false })
     }
 
     @Test fun finalTargetsGoOutside() {
-        assertEquals(Nav.Close, RichPush.navigation("ttmailer://close", hosts))
-        assertEquals(Nav.Close, RichPush.navigation("TTMailer://close", hosts))
-        assertEquals(Nav.Ignore, RichPush.navigation("ttmailer://other", hosts))
-        assertEquals(Nav.Store("https://apps.apple.com/app/id1"), RichPush.navigation("https://apps.apple.com/app/id1", hosts))
-        assertEquals(Nav.Store("market://details?id=x"), RichPush.navigation("market://details?id=x", hosts))
-        assertEquals(Nav.InApp("https://example.com/a"), RichPush.navigation("https://example.com/a", hosts))
-        assertEquals(Nav.InApp("http://mailer.example.com.evil.com/"), RichPush.navigation("http://mailer.example.com.evil.com/", hosts))
-        assertEquals(Nav.DeepLink("myapp://premium?x=1"), RichPush.navigation("myapp://premium?x=1", hosts))
-        assertEquals(Nav.DeepLink("mailto:a@example.com"), RichPush.navigation("mailto:a@example.com", hosts))
+        assertEquals(Nav.Close, nav("ttmailer://close"))
+        assertEquals(Nav.Close, nav("TTMailer://close"))
+        assertEquals(Nav.Ignore, nav("ttmailer://other"))
+        assertEquals(Nav.Store("https://apps.apple.com/app/id1"), nav("https://apps.apple.com/app/id1"))
+        assertEquals(Nav.Store("market://details?id=x"), nav("market://details?id=x"))
+        assertEquals(Nav.InApp("https://example.com/a"), nav("https://example.com/a"))
+        assertEquals(Nav.InApp("https://mailer.example.com.evil.com/"), nav("https://mailer.example.com.evil.com/"))
+    }
+
+    @Test fun onlyTheAppsOwnSchemesAreDeepLinks() {
+        assertEquals(Nav.AppLink("myapp://premium?x=1"), nav("myapp://premium?x=1"))
+        assertEquals(Nav.AppLink("MyApp://premium"), nav("MyApp://premium"))
+        assertEquals(Nav.System("mailto:a@example.com"), nav("mailto:a@example.com"))
+        assertEquals(Nav.System("tel:+420123"), nav("tel:+420123"))
+        assertEquals(Nav.System("geo:50,14"), nav("geo:50,14"))
+        assertEquals(Nav.System("otherapp://x"), nav("otherapp://x"))
+        val intent = "intent://scan/#Intent;scheme=zxing;package=com.google.zxing.client.android;end"
+        assertEquals(Nav.AndroidIntent(intent), nav(intent))
     }
 
     @Test fun dangerousOrBrokenUrlsAreIgnored() {
-        listOf("javascript:alert(1)", "file:///etc/hosts", "content://x/y", "data:text/html,hi", "", "no scheme", null)
-            .forEach { assertEquals(it.toString(), Nav.Ignore, RichPush.navigation(it, hosts)) }
+        listOf("javascript:alert(1)", "file:///etc/hosts", "content://x/y", "data:text/html,hi", "blob:https://a/b",
+            "about:blank", "about:srcdoc", "", "no scheme", null)
+            .forEach { assertEquals(it.toString(), Nav.Ignore, nav(it)) }
+    }
+
+    @Test fun leavingNeedsATapOrARedirect() {
+        assertEquals(Nav.InApp("https://example.com/"), decide("https://example.com/", gesture = true))
+        assertEquals(Nav.InApp("https://example.com/"), decide("https://example.com/", gesture = false, redirect = true))
+        assertEquals(Nav.Ignore, decide("https://example.com/", gesture = false))
+        assertEquals(Nav.Ignore, decide("myapp://x", gesture = false))
+        assertEquals(Nav.Ignore, decide("ttmailer://close", gesture = false))
+        // TTMailer pages need neither (they stay).
+        assertEquals(Nav.Stay("https://mailer.example.com/p/m/tok"), decide("https://mailer.example.com/p/m/tok", gesture = false))
+    }
+
+    @Test fun subFramesNeverLeaveOrClose() {
+        assertEquals(Nav.Ignore, decide("ttmailer://close", main = false))
+        assertEquals(Nav.Ignore, decide("myapp://x", main = false))
+        assertEquals(Nav.Ignore, decide("https://example.com/", main = false))
+        assertEquals(Nav.Stay("https://mailer.example.com/x"), decide("https://mailer.example.com/x", main = false))
+    }
+
+    @Test fun onlyTtmailerDocumentsLoadInFrames() {
+        val iframe = mapOf("Sec-Fetch-Dest" to "iframe")
+        assertTrue(RichPush.blocksSubframe("https://example.com/", false, iframe, hosts))
+        assertTrue(RichPush.blocksSubframe("https://example.com/", false, mapOf("Accept" to "text/html,application/xhtml+xml"), hosts))
+        assertFalse(RichPush.blocksSubframe("https://mailer.example.com/x", false, iframe, hosts))
+        assertFalse(RichPush.blocksSubframe("https://cdn.example.com/a.png", false, mapOf("Accept" to "image/webp,*/*"), hosts))
+        assertFalse(RichPush.blocksSubframe("https://cdn.example.com/a.png", false, mapOf("Sec-Fetch-Dest" to "image"), hosts))
+        assertFalse(RichPush.blocksSubframe("https://cdn.example.com/a.css", false, null, hosts))
+        assertFalse(RichPush.blocksSubframe("https://example.com/", true, iframe, hosts))
+    }
+
+    @Test fun intentUrlFallbacks() {
+        assertEquals("https://example.com/a?x=1",
+            RichPush.intentFallback("intent://x#Intent;scheme=z;S.browser_fallback_url=https%3A%2F%2Fexample.com%2Fa%3Fx%3D1;end"))
+        assertEquals("https://play.google.com/store/apps/details?id=com.google.zxing.client.android",
+            RichPush.intentFallback("intent://scan/#Intent;scheme=zxing;package=com.google.zxing.client.android;end"))
+        assertEquals("https://play.google.com/store/apps/details?id=com.a.b",
+            RichPush.intentFallback("intent://x#Intent;package=com.a.b;S.browser_fallback_url=javascript%3Aalert(1);end"))
+        assertEquals(null, RichPush.intentFallback("intent://x#Intent;scheme=z;end"))
+        assertEquals(null, RichPush.intentFallback("intent://x"))
     }
 
     // Opening a store

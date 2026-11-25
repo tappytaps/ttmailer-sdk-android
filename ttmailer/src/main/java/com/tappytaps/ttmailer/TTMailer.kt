@@ -6,6 +6,7 @@ import android.content.Context
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -212,17 +213,23 @@ object TTMailer {
     }
 
     private fun perform(activity: Activity, tap: RichPush.Tap) {
-        if (activity.isFinishing) return
+        // A trampoline or splash activity that already finishes: the action still runs, from the application
+        // context in a new task (call handle from the activity that stays, after routing, to keep the app's task).
+        val context: Context = if (activity.isFinishing || activity.isDestroyed) {
+            Log.w("TTMailer", "handle: ${activity.javaClass.simpleName} is finishing, the push's action starts from the application context")
+            activity.applicationContext
+        } else activity
         try {
             when (tap) {
-                is RichPush.Tap.Browser -> Launcher.browser(activity, tap.url)
-                is RichPush.Tap.InApp -> Launcher.inApp(activity, tap.url)
-                is RichPush.Tap.Store -> Launcher.store(activity, tap.url)
-                is RichPush.Tap.Message -> TTMailerMessageActivity.start(activity, tap.url, RichPush.ttmailerHosts(engine?.baseUrl ?: baseUrl, tap.url))
+                is RichPush.Tap.Browser -> Launcher.browser(context, tap.url)
+                is RichPush.Tap.InApp -> Launcher.inApp(context, tap.url)
+                is RichPush.Tap.Store -> Launcher.store(context, tap.url)
+                is RichPush.Tap.Message -> TTMailerMessageActivity.start(context, tap.url, RichPush.ttmailerHosts(engine?.baseUrl ?: baseUrl, tap.url))
                 is RichPush.Tap.ReturnLink -> {}
             }
-        } catch (_: Exception) {
-            // A tap must never crash the app (e.g. the activity is gone).
+        } catch (e: Exception) {
+            Log.w("TTMailer", "handle: the push's action failed", e)
+            // A tap must never crash the app.
         }
     }
 

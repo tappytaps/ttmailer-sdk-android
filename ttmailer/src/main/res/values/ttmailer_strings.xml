@@ -4,4 +4,5 @@
     <string name="ttmailer_try_again">Try again</string>
     <string name="ttmailer_message_failed">The message could not be loaded.</string>
     <string name="ttmailer_message_offline">The message could not be loaded. Check your internet connection.</string>
+    <string name="ttmailer_link_failed">The link could not be opened.</string>
 </resources>

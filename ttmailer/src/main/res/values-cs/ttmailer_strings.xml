@@ -4,4 +4,5 @@
     <string name="ttmailer_try_again">Zkusit znovu</string>
     <string name="ttmailer_message_failed">Zprávu se nepodařilo načíst.</string>
     <string name="ttmailer_message_offline">Zprávu se nepodařilo načíst. Zkontrolujte připojení k internetu.</string>
+    <string name="ttmailer_link_failed">Odkaz se nepodařilo otevřít.</string>
 </resources>
