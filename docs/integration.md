@@ -31,9 +31,11 @@ to TTMailer from that backend. Apps without a backend use this SDK instead:
   the confirmation does the address join the installation's contact. Without a confirmation nothing is joined, so
   nobody can attach someone else's address.
 - **Push opens.** A tap on a TTMailer push is reported back, so open rates and automations work.
+- **Rich push (0.4.0).** A push can open a web page in the browser or in Custom Tabs, or show an in-app message
+  written in TTMailer, without any code in the app beyond `TTMailer.handle`.
 
-The SDK is written in Kotlin and has no dependencies; it does not even depend on Firebase, the app passes the token.
-It supports Android 7+ (minSdk 24) and can be called from Kotlin (callbacks or coroutines) and Java.
+The SDK is written in Kotlin. Its only dependency is `androidx.browser` (Custom Tabs, for the rich push); it does not
+even depend on Firebase, the app passes the token. It supports Android 7+ (minSdk 24) and can be called from Kotlin (callbacks or coroutines) and Java.
 
 ## 2. Set up the app in TTMailer
 
@@ -74,7 +76,7 @@ dependencyResolutionManagement {
 
 // app/build.gradle.kts
 dependencies {
-    implementation("com.github.tappytaps:ttmailer-sdk-android:0.3.0")
+    implementation("com.github.tappytaps:ttmailer-sdk-android:0.4.0")
 }
 ```
 
@@ -82,10 +84,12 @@ With a version catalog:
 
 ```toml
 [libraries]
-ttmailer = { module = "com.github.tappytaps:ttmailer-sdk-android", version = "0.3.0" }
+ttmailer = { module = "com.github.tappytaps:ttmailer-sdk-android", version = "0.4.0" }
 ```
 
-The library declares the `INTERNET` permission and ships its ProGuard / R8 rules; nothing else is needed. Firebase
+The library declares the `INTERNET` permission, the in-app message activity and a `<queries>` entry for Custom Tabs,
+and ships its ProGuard / R8 rules; nothing else is needed. It brings `androidx.browser:browser:1.8.0` (Gradle
+resolves a newer one if the app has it). Firebase
 Messaging is added by the app as usual (`com.google.firebase:firebase-messaging`).
 
 ## 4. Start the SDK
@@ -150,7 +154,21 @@ If the app has its own in-app switch, send `appSwitch && systemAllowed`.
 
 ### Taps
 
-TTMailer pushes carry `ttmToken` (for the open report) and usually a link under `redirectUrl` in their data.
+TTMailer pushes carry `ttmToken` (for the open report) and usually a link under `redirectUrl` in their data. Pushes
+sent with an SDK action (TTMailer: *Po klepnutí*) also carry `ttmAction` and `ttmUrl`.
+
+Call `TTMailer.handle(activity, …)` when the user taps a notification. It reports the open and does what the push
+says:
+
+| Po klepnutí (`ttmAction`) | What `handle` does | Returns |
+|---|---|---|
+| Otevřít aplikaci (absent, `app`) | Nothing more: the app opens the link itself, as before. | the push's link (or `null`) |
+| Prohlížeč (`browser`) | Opens `ttmUrl` in the system browser. | `null` |
+| V aplikaci (`inapp`) | Opens `ttmUrl` in Custom Tabs (the system browser when no installed browser has Custom Tabs). | `null` |
+| Zpráva v aplikaci (`message`) | Shows the message full screen over the activity (below). | `null` |
+
+Links to App Store or Google Play (`play.google.com/store…`, `market://`, `apps.apple.com`, `itunes.apple.com`,
+`itms-apps://`) always open the store: the Play Store app, or the browser.
 
 **The app is in the background or not running.** FCM shows the notification itself. A tap opens the launcher
 activity, and the push's data is in the intent extras:
@@ -166,10 +184,13 @@ class MainActivity : AppCompatActivity() {
         handlePush(intent)
     }
     private fun handlePush(intent: Intent) {
-        TTMailer.opened(intent.extras)?.let { link -> Router.open(this, Uri.parse(link)) }
+        TTMailer.handle(this, intent.extras)?.let { link -> Router.open(this, Uri.parse(link)) }
     }
 }
 ```
+
+Call `handle` once per tap, on the main thread: with `savedInstanceState == null` in `onCreate`, so a rotation does not
+open the message again.
 
 **The app is in the foreground.** `onMessageReceived` gets the push, and the app shows its own notification. Put the
 data into the notification's intent, then handle it the same way:
@@ -186,11 +207,38 @@ override fun onMessageReceived(message: RemoteMessage) {
 }
 ```
 
-`TTMailer.opened(Map<String, String?>)` takes `RemoteMessage.data` directly, if the app handles the data some other way.
+`TTMailer.handle(activity, Map<String, String?>)` takes `RemoteMessage.data` directly, if the app handles the data some
+other way.
 
-`opened` returns the link at once and reports the open in the background. A launch without a push returns `null` and
-sends nothing. Pushes from other sources (no `ttmToken`) are not reported. An open made offline is kept and sent later
-(the last 100 at most).
+`handle` returns at once and reports the open in the background. A launch without a push returns `null` and does
+nothing. Pushes from other sources (no `ttmToken`) are not reported, but their link is returned. An open made offline
+is kept and sent later (the last 100 at most). With an SDK action the open also counts as the tap.
+
+`TTMailer.opened(…)` still works as before (it reports the open and returns the link, but ignores `ttmAction`). It is
+deprecated in these docs in favour of `handle`: an app that keeps `opened` opens every push's link itself, so the
+browser and in-app browser pushes still work (the link), but a message opens as a web page.
+
+### The in-app message
+
+A push with *Zpráva v aplikaci* shows a page written in TTMailer (`ttmUrl`, `…/p/m/<token>`) in the SDK's own
+full-screen activity, `TTMailerMessageActivity`, over the activity passed to `handle`:
+
+- A close button at the top, Back closes it too. The colours follow the system's light or dark mode.
+- JavaScript is off. The first load carries the header `X-TTMailer-SDK: <version>` (TTMailer then shows the message's
+  close links, `ttmailer://close`).
+- No network, or an error answer (HTTP 400 and above): an error with *Zkusit znovu* / *Try again*.
+- Links:
+  - pages on the TTMailer server (the click redirects, so the click is counted) stay in the message;
+  - `ttmailer://close` closes the message;
+  - a store link opens the store, another web page opens in Custom Tabs; the message stays open below;
+  - a deep link (any other scheme, e.g. `myapp://premium`) closes the message, then goes to `TTMailer.onDeepLink`:
+
+```kotlin
+// Application.onCreate, after configure:
+TTMailer.onDeepLink = { link -> Router.open(currentActivity, Uri.parse(link)) }
+```
+
+  Without `onDeepLink` the system opens the deep link (the app's own intent filters, like a link from another app).
 
 ## 6. User accounts
 
@@ -342,7 +390,8 @@ TTMailer.reset()           // suspend; a "reset app" action, or opting out of TT
 - **When it sends.**
   - The installation is sent at start, on every change and when an activity resumes.
   - It holds the installation id (a random UUID), the token, the switch, the user id, the device language, time zone,
-    app version (`versionName`) and Android version.
+    app version (`versionName`), Android version and the SDK version (`sdkVersion`, so TTMailer knows which devices
+    can show rich pushes).
   - It is not sent when nothing changed and the last send is less than a day old. The daily send keeps "last active in
     the app" on the contact.
 - **Offline.**
@@ -365,7 +414,8 @@ TTMailer.reset()           // suspend; a "reset app" action, or opting out of TT
   ```
 
 - **Threads.** One background thread for the SDK's work; callbacks run on the main thread. Nothing blocks the caller.
-- **Size.** No dependencies, no WorkManager, no services: the app calls the SDK where it wants to.
+- **Size.** One small dependency (`androidx.browser`), no WorkManager, no services: the app calls the SDK where it
+  wants to. The in-app message is a plain `Activity` with a system `WebView`; no AppCompat.
 
 ## 11. Privacy
 
@@ -393,10 +443,14 @@ Data is encrypted in transit (HTTPS). Users can ask for deletion; the app does t
   `onNewToken`.
 - **The device is there, but pushes do not arrive.** Check the project's FCM credentials and the package of the app in
   TTMailer, and that notifications are allowed for the app (Android 13+).
-- **The push arrives, but the open is not counted.** The launcher activity must call `TTMailer.opened(intent.extras)`
+- **The push arrives, but the open is not counted.** The launcher activity must call `TTMailer.handle(this, intent.extras)`
   in `onCreate` and `onNewIntent`. A notification the app builds itself must carry the push's data in its intent.
 - **`subscribe` fails with `NO_FORM` / `FORM_WITHOUT_CONFIRMATION`.** Fix the app's form in TTMailer (section 2).
 - **Everything fails with a 404.** The key is wrong, rotated or disabled, or the project is archived.
+- **A browser / in-app / message push opens the link like a normal push.** The app still calls `opened` instead of
+  `handle`, or runs SDK 0.3.x (TTMailer counts the devices on 0.4.0+ in the push editor).
+- **A message shows the error.** The device is offline, or TTMailer answered with an error. *Try again* loads it
+  again. A message older than 30 days is not an error: TTMailer's page says it is no longer available.
 - **A test server.** `TTMailer.configure(this, appKey = "…", baseUrl = "https://…")` with a key from that server.
 
 ## 13. API reference
@@ -410,7 +464,10 @@ All on the `TTMailer` object (`@JvmStatic`).
 | `setPushEnabled(enabled: Boolean)` | The user's notification choice; writes the app's push topic. |
 | `setUserId(userId: String?)` | The account id after sign-in; `null` after sign-out. |
 | `subscribe(email, language?, callback)` / `suspend subscribe(email, language?)` | The newsletter sign-up with a confirmation e-mail. |
-| `opened(extras: Bundle?): String?` / `opened(data: Map<String, String?>): String?` | Reports a tap on a push; returns its link. |
+| `handle(activity, extras: Bundle?): String?` / `handle(activity, data: Map<String, String?>): String?` | Reports a tap on a push and does its action (browser, Custom Tabs, message); returns the link for the app, or `null` when the SDK handled it. Main thread. |
+| `onDeepLink: ((String) -> Unit)?` | Deep links from an in-app message (main thread); `null` = the system opens them. |
+| `opened(extras: Bundle?): String?` / `opened(data: Map<String, String?>): String?` | Reports a tap on a push; returns its link. Ignores the action: use `handle`. |
+| `SDK_VERSION` | This SDK's version (`"0.4.0"`). |
 | `reset(callback)` / `suspend reset()` | Removes this installation and starts a new one. |
 | `deleteContact(callback)` / `suspend deleteContact()` | Erases the user's contact (account deletion). |
 | `installationId: String?` | The current installation id (`null` before `configure`). |
@@ -439,11 +496,12 @@ The SDK is a thin client of TTMailer's public SDK API. Every call carries the he
 
 | Call | Used by |
 |---|---|
-| `PUT /sdk/v1/installations/{installationId}` with `{pushToken, pushEnabled, language, timeZone, appVersion, osVersion, userId}` | sync |
+| `PUT /sdk/v1/installations/{installationId}` with `{pushToken, pushEnabled, language, timeZone, appVersion, osVersion, sdkVersion, userId}` | sync |
 | `POST /sdk/v1/installations/{installationId}/subscribe` with `{email, language}` | `subscribe` |
 | `DELETE /sdk/v1/installations/{installationId}` | `reset` |
 | `DELETE /sdk/v1/installations/{installationId}/contact` | `deleteContact` |
-| `POST /p/open` with `{t: ttmToken, at}` (no key) | `opened` |
+| `POST /p/open` with `{t: ttmToken, at}` (no key) | `handle`, `opened` |
+| `GET /p/m/{token}` with the header `X-TTMailer-SDK` (no key, in the WebView) | the in-app message |
 
 Limits:
 - 300 calls per IP address and minute;
