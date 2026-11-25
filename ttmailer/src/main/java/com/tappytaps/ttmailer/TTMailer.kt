@@ -20,6 +20,9 @@ import kotlin.coroutines.suspendCoroutine
  * when it can (on the next change, when the app comes to the foreground, or after a growing pause).
  */
 object TTMailer {
+    /** This SDK's version; TTMailer learns it with every installation (`sdkVersion`). */
+    const val SDK_VERSION = "0.4.0"
+
     @Volatile private var engine: Engine? = null
     private val worker: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "ttmailer-sdk").apply { isDaemon = true }
@@ -32,6 +35,14 @@ object TTMailer {
     @Volatile private var automaticPurchases = false
     @Volatile private var lifetimeProducts: Set<String>? = null
     @Volatile private var lastStoreReadAt = 0L
+    @Volatile private var baseUrl = "https://mailer.tappytaps.com"
+    @Volatile private var linkKey = "redirectUrl"
+
+    /**
+     * Deep links from an in-app message (a link to another scheme, e.g. `myapp://premium`): the message closes first,
+     * then this runs on the main thread. Null (the default): the system opens the link (the app's own intent filters).
+     */
+    @JvmStatic @Volatile var onDeepLink: ((String) -> Unit)? = null
 
     /**
      * Starts the SDK with the app key from TTMailer (Nastavení → Aplikace (SDK)).
@@ -43,6 +54,8 @@ object TTMailer {
     fun configure(context: Context, appKey: String, baseUrl: String = "https://mailer.tappytaps.com", linkKey: String = "redirectUrl") {
         val app = context.applicationContext
         appContext = app
+        this.baseUrl = baseUrl
+        this.linkKey = linkKey
         engine = Engine(appKey, baseUrl, linkKey, UrlConnectionTransport(), PrefsStore(app), { DeviceInfo.current(app) })
         onWorker { it.syncAndFlush() }
         if (!callbacksRegistered && app is Application) {
@@ -136,12 +149,35 @@ object TTMailer {
         return link
     }
 
-    /** [opened] with the extras of the activity's intent. */
+    /** [opened] with the extras of the activity's intent. Prefer [handle], which also does the push's tap action. */
     @JvmStatic fun opened(extras: Bundle?): String? {
         if (extras == null) return null
-        val map = HashMap<String, String?>()
-        for (k in extras.keySet()) map[k] = extras.getString(k)
-        return opened(map)
+        return opened(extrasMap(extras))
+    }
+
+    /**
+     * Call when the user opens a notification (instead of [opened]): reports the open, then does what the push says
+     * on a tap (TTMailer: Po klepnutí):
+     * - open the app (the default): returns the push's link (a deep link or URL) for the app to open, as [opened];
+     * - the browser, or the in-app browser (Custom Tabs): opens the link and returns null;
+     * - an in-app message: shows it full screen over [activity] and returns null.
+     *
+     * Links to App Store or Google Play always open the store. Call it on the main thread, once per tap (e.g. in
+     * `onCreate` only when `savedInstanceState == null`, and in `onNewIntent`).
+     * @param data `RemoteMessage.data`, or the extras of the launch intent (see the other overload).
+     */
+    @JvmStatic fun handle(activity: Activity, data: Map<String, String?>): String? {
+        val link = opened(data)
+        return when (val tap = RichPush.tap(data, engine?.linkKey ?: linkKey)) {
+            is RichPush.Tap.ReturnLink -> link ?: tap.link
+            else -> { onMain { perform(activity, tap) }; null }
+        }
+    }
+
+    /** [handle] with the extras of the activity's intent (FCM puts the push's data there when the app was in the background). */
+    @JvmStatic fun handle(activity: Activity, extras: Bundle?): String? {
+        if (extras == null) return null
+        return handle(activity, extrasMap(extras))
     }
 
     /**
@@ -164,6 +200,31 @@ object TTMailer {
     suspend fun deleteContact(): Unit = await { cb -> deleteContact(cb) }
 
     // Internals
+
+    private fun extrasMap(extras: Bundle): Map<String, String?> {
+        val map = HashMap<String, String?>()
+        for (k in extras.keySet()) map[k] = extras.getString(k)
+        return map
+    }
+
+    private fun onMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
+    }
+
+    private fun perform(activity: Activity, tap: RichPush.Tap) {
+        if (activity.isFinishing) return
+        try {
+            when (tap) {
+                is RichPush.Tap.Browser -> Launcher.browser(activity, tap.url)
+                is RichPush.Tap.InApp -> Launcher.inApp(activity, tap.url)
+                is RichPush.Tap.Store -> Launcher.store(activity, tap.url)
+                is RichPush.Tap.Message -> TTMailerMessageActivity.start(activity, tap.url, RichPush.ttmailerHosts(engine?.baseUrl ?: baseUrl, tap.url))
+                is RichPush.Tap.ReturnLink -> {}
+            }
+        } catch (_: Exception) {
+            // A tap must never crash the app (e.g. the activity is gone).
+        }
+    }
 
     private fun onWorker(block: (Engine) -> Unit) {
         val e = engine ?: return

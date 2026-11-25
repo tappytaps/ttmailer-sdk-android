@@ -13,7 +13,7 @@ import java.util.UUID
  */
 internal class Engine(
     private val appKey: String,
-    private val baseUrl: String,
+    val baseUrl: String,
     val linkKey: String,
     private val transport: HttpTransport,
     private val store: KeyValueStore,
@@ -107,6 +107,8 @@ internal class Engine(
         store.get(K.ENABLED)?.let { b["pushEnabled"] = it == "true" }
         if (store.get(K.USER_SET) == "true") b["userId"] = store.get(K.USER)
         if (store.get(K.TRACK) == "false") b["trackActivity"] = false
+        // TTM-624: TTMailer knows which devices can show rich pushes.
+        b["sdkVersion"] = TTMailer.SDK_VERSION
         return Json.encode(b)
     }
 

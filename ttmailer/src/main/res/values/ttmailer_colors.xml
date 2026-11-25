@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The in-app message (TTM-624). -->
+    <color name="ttmailer_background">#FFFFFFFF</color>
+    <color name="ttmailer_text">#FF1F1F1F</color>
+    <color name="ttmailer_accent">#FF1A73E8</color>
+</resources>

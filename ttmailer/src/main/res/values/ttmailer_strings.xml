@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ttmailer_close">Close</string>
+    <string name="ttmailer_try_again">Try again</string>
+    <string name="ttmailer_message_failed">The message could not be loaded.</string>
+    <string name="ttmailer_message_offline">The message could not be loaded. Check your internet connection.</string>
+</resources>

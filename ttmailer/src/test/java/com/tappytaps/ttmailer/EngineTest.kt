@@ -50,6 +50,7 @@ class EngineTest {
         val b = json(t.sent[0].body)
         assertEquals("cs-CZ", b["language"]); assertEquals("Europe/Prague", b["timeZone"])
         assertEquals("3.2.1", b["appVersion"]); assertEquals("14", b["osVersion"])
+        assertEquals(TTMailer.SDK_VERSION, b["sdkVersion"])
         assertFalse(b.containsKey("pushToken")); assertFalse(b.containsKey("userId"))
     }
 

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The in-app message (TTM-624): follows the system's light/dark mode (values-night). -->
+    <style name="TTMailer.Message" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/ttmailer_background</item>
+        <item name="android:statusBarColor">@color/ttmailer_background</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorAccent">@color/ttmailer_accent</item>
+    </style>
+</resources>
